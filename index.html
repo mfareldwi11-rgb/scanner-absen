@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scan QR Absensi</title>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--board:#1F3B36;--paper:#F4F5F1;--ink:#1B2421;--mute:#66726D;--line:#DDE2DC;--chalk:#E8B93C;--H:#2E8B57;--S:#C98A12;--A:#C2453C}
+*{box-sizing:border-box}
+body{margin:0;font-family:Figtree,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--paper);color:var(--ink);line-height:1.5}
+button,input{font:inherit}
+:focus-visible{outline:3px solid var(--chalk);outline-offset:2px}
+.hide{display:none!important}
+header{background:var(--board);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+header b{font-size:18px}header span{color:#BFD0CB;font-size:14px}
+header button{background:none;border:1px solid #ffffff66;color:#fff;border-radius:8px;padding:6px 14px;cursor:pointer}
+.wrap{max-width:980px;margin:0 auto;padding:20px;display:grid;grid-template-columns:1.2fr 1fr;gap:18px}
+@media(max-width:800px){.wrap{grid-template-columns:1fr}}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px}
+label{display:grid;gap:5px;font-weight:600;font-size:14px}
+input{border:1px solid #C6CEC8;border-radius:8px;padding:11px 12px;width:100%;background:#fff}
+.btn{background:var(--board);color:#fff;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;font-weight:600}
+.btn.sec{background:#fff;color:var(--ink);border:1px solid var(--line)}
+#login{max-width:380px;margin:12vh auto;padding:0 20px;display:grid;gap:14px}
+#scanIn{font-size:22px;padding:16px;letter-spacing:.5px}
+#res{margin-top:16px;border-radius:12px;padding:22px;min-height:150px;background:#ECEEEA;display:flex;flex-direction:column;justify-content:center}
+#res h2{margin:0;font-size:28px;line-height:1.2}
+#res p{margin:4px 0 0;font-size:16px}
+#res.ok{background:var(--H);color:#fff}
+#res.dup{background:var(--S);color:#fff}
+#res.err{background:var(--A);color:#fff}
+#res .big{font-size:14px;opacity:.9;margin-bottom:6px}
+.sub{color:var(--mute);font-size:14px}
+ul{list-style:none;margin:10px 0 0;padding:0;max-height:62vh;overflow:auto}
+li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+li small{color:var(--mute);display:block}
+#cam{margin-bottom:6px}
+#reader{width:100%;max-width:440px;margin:10px auto 0;border-radius:10px;overflow:hidden}
+</style>
+</head>
+<body>
+
+<div id="scan">
+  <header><div><b id="sch">Scan QR Absensi</b><br><span id="who">Absen hadir dengan scan QR kartu siswa</span></div></header>
+  <div class="wrap">
+    <div>
+      <div class="card">
+        <div id="cam">
+          <button class="btn sec" id="camBtn" onclick="startCam()">Aktifkan kamera</button>
+          <div id="reader"></div>
+          <p id="camMsg" class="sub" style="margin:8px 0 0"></p>
+        </div>
+        <label style="margin-top:14px">Atau pakai scanner USB/Bluetooth ke QR kartu siswa (atau ketik NIS lalu Enter)
+          <input id="scanIn" autocomplete="off" inputmode="numeric" placeholder="Menunggu scan…"></label>
+        <p class="sub" style="margin:8px 0 0">Scanner USB/Bluetooth bekerja seperti keyboard. Kursor otomatis kembali ke kolom ini.</p>
+        <div id="res"><h2>Siap memindai</h2><p>Hasil scan akan tampil di sini.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <b>Sudah scan hari ini</b> <span class="sub" id="cnt"></span>
+      <ul id="list"></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+let cam=null,last={c:'',t:0};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ISI DENGAN URL /exec JIKA Scanner.html DIHOSTING DI LUAR APPS SCRIPT (GitHub Pages, Netlify, dll).
+   Jika dibuka lewat Apps Script (?page=scanner), biarkan kosong. */
+const API_URL = 'https://script.google.com/macros/s/AKfycbzaFMdYuZAzknKu0FgF5XT3cJQCNxe30qfz-V1nnWIeAEKV9CjP5GGfO0oTA_EYwy3KjA/exec';
+const IN_GAS = !!(window.google && google.script && google.script.run);
+
+async function call(api,params){
+  if(IN_GAS){
+    return new Promise((res,rej)=>{
+      const h=google.script.run.withSuccessHandler(res).withFailureHandler(e=>rej(new Error(e.message||String(e))));
+      if(api==='scan')h.scanPublic(params.nis);else if(api==='today')h.scanTodayPublic();else h.publicInfo();
+    });
+  }
+  if(!API_URL)throw new Error('API_URL belum diisi di Scanner.html.');
+  if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(API_URL))throw new Error('API_URL salah. Harus berupa URL Apps Script yang berakhiran /exec.');
+  const url=API_URL+'?'+new URLSearchParams(Object.assign({api},params||{})).toString();
+  try{
+    const r=await fetch(url,{redirect:'follow'});
+    const t=await r.text();
+    try{return JSON.parse(t)}catch(e){throw new Error('NOTJSON')}
+  }catch(e){
+    if(e.message==='NOTJSON')throw new Error('Server belum memakai Code.gs terbaru. Buat Versi baru di Deploy > Kelola deployment.');
+    try{return await jsonp(url)}
+    catch(e2){throw new Error('Tidak bisa terhubung ke server. Periksa: (1) URL /exec benar, (2) Deploy akses "Siapa saja", (3) sudah Versi baru.')}
+  }
+}
+function jsonp(url){
+  return new Promise((res,rej)=>{
+    const cb='cb'+Date.now()+Math.floor(Math.random()*1e6),s=document.createElement('script');
+    const end=()=>{clearTimeout(t);delete window[cb];s.remove()};
+    const t=setTimeout(()=>{end();rej(new Error('timeout'))},15000);
+    window[cb]=d=>{end();res(d)};
+    s.onerror=()=>{end();rej(new Error('jsonp'))};
+    s.src=url+'&callback='+cb;document.head.appendChild(s);
+  });
+}
+async function rpc(action,p){
+  const r=await call(action==='scan'?'scan':'today',p);
+  if(r&&r.ok)return r.data;
+  throw new Error((r&&r.error)||'Terjadi kesalahan.');
+}
+call('info').then(r=>{if(r&&r.ok){if(r.data.nama_sekolah)$('sch').textContent=r.data.nama_sekolah;$('who').textContent='Terhubung ke server ✓'}else throw new Error((r&&r.error)||'Server tidak merespons')})
+  .catch(e=>{$('who').textContent='Belum terhubung: '+e.message;$('who').style.color='#ffb4a8'});
+
+loadList();
+function focusIn(){const i=$('scanIn');if(i&&!cam)i.focus()}
+document.addEventListener('click',e=>{if(!e.target.closest('button'))focusIn()});
+setInterval(()=>{if(document.activeElement===document.body)focusIn()},1500);
+
+$('scanIn').addEventListener('keydown',e=>{
+  if(e.key!=='Enter')return;
+  e.preventDefault();const v=e.target.value.trim();e.target.value='';
+  if(v)submit(v);
+});
+
+let sending=false,queue=[];
+async function submit(code){
+  if(sending){queue.push(code);return}
+  sending=true;
+  show('','Memproses…',code);
+  try{
+    const r=await rpc('scan',{nis:code});
+    if(r.duplicate){beep(300);show('dup','Sudah absen',r.nama,r.kelas+' · tercatat pukul '+r.jam.slice(0,5))}
+    else{beep(880);show('ok',r.nama,'Hadir · '+r.kelas,'Pukul '+r.jam.slice(0,5))}
+    loadList();
+  }catch(e){beep(180);last.t=0;show('err','Gagal',e.message)}
+  sending=false;
+  if(queue.length)submit(queue.shift());
+}
+function show(cls,a,b,c){
+  const r=$('res');r.className=cls;
+  r.innerHTML=cls==='ok'||cls==='dup'
+    ?`<div class="big">${cls==='ok'?'Absen hadir tercatat':esc(a)}</div><h2>${cls==='ok'?esc(a):esc(b)}</h2><p>${esc(cls==='ok'?b:c)}</p>${cls==='ok'?`<p>${esc(c)}</p>`:''}`
+    :`<h2>${esc(a)}</h2><p>${esc(b)}</p>`;
+}
+async function loadList(){
+  try{
+    const d=await rpc('scan.today');
+    $('cnt').textContent='('+d.list.length+')';
+    $('list').innerHTML=d.list.map(x=>`<li><div><b>${esc(x.nama)}</b><small>${esc(x.kelas)} · NIS ${esc(x.nis)}</small></div><span>${esc(x.jam.slice(0,5))}</span></li>`).join('')
+      ||'<li class="sub">Belum ada siswa yang scan.</li>';
+  }catch(e){}
+}
+function beep(f){
+  try{const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();
+    o.frequency.value=f;g.gain.value=.15;o.connect(g);g.connect(a.destination);o.start();setTimeout(()=>{o.stop();a.close()},160)}catch(e){}
+}
+
+/* Kamera (opsional). Catatan: sebagian browser memblokir kamera di halaman Apps Script. */
+function loadLib(){return new Promise((res,rej)=>{
+  if(window.Html5Qrcode)return res();
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js';
+  s.onload=res;s.onerror=()=>rej(new Error('Gagal memuat pustaka kamera.'));document.head.appendChild(s)})}
+async function startCam(){
+  const m=$('camMsg');m.textContent='Membuka kamera…';
+  try{
+    await loadLib();
+    cam=new Html5Qrcode('reader');
+    const onScan=txt=>{const n=Date.now();if(txt===last.c&&n-last.t<4000)return;last={c:txt,t:n};submit(txt.trim())};
+    const cfg={fps:10,qrbox:{width:250,height:250}};
+    try{await cam.start({facingMode:'environment'},cfg,onScan)}
+    catch(e1){
+      const cams=await Html5Qrcode.getCameras();
+      if(!cams.length)throw e1;
+      await cam.start(cams[cams.length-1].id,cfg,onScan);
+    }
+    m.textContent='Kamera aktif. Arahkan ke QR siswa.';
+    $('camBtn').textContent='Matikan kamera';$('camBtn').onclick=stopCam;
+  }catch(e){
+    m.textContent='Kamera tidak dapat dibuka ('+(e.message||e)+'). Izinkan akses kamera di browser lalu klik Aktifkan kamera. Jika berjalan di dalam Apps Script, kamera biasanya diblokir: hosting Scanner.html di luar Apps Script (lihat petunjuk).';
+    cam=null;
+  }
+}
+async function stopCam(){
+  try{if(cam){await cam.stop();cam.clear()}}catch(e){}
+  cam=null;$('camBtn').textContent='Aktifkan kamera';$('camBtn').onclick=startCam;$('camMsg').textContent='';
+}
+window.addEventListener('load',startCam);
+</script>
+</body>
+</html>
